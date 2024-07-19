@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>E-commerce Frontend</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <h1>Welcome to the E-commerce Frontend</h1>
+    <div id="products"></div>
+    <script>
+        async function fetchProducts() {
+            const response = await fetch('http://51.17.85.202/products', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ /* product data */ })
+            });
+            const data = await response.json();
+            document.getElementById('products').innerText = JSON.stringify(data);
+        }
+
+        fetchProducts();
+    </script>
+</body>
+</html>
