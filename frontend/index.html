@@ -2,23 +2,58 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-commerce Frontend</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
-    <h1>Welcome to the E-commerce Frontend</h1>
-    <div id="products"></div>
+    <header>
+        <h1>Welcome to the E-commerce Frontend!</h1>
+    </header>
+    <main>
+        <section id="products">
+            <h2>Products</h2>
+            <div id="product-list"></div>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2024 E-commerce Frontend</p>
+    </footer>
+
     <script>
+        const apiUrl = 'https://i8kr05wzp9.execute-api.il-central-1.amazonaws.com/prod';
+
         async function fetchProducts() {
-            const response = await fetch('http://51.17.85.202/products', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ /* product data */ })
-            });
-            const data = await response.json();
-            document.getElementById('products').innerText = JSON.stringify(data);
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        action: 'getProducts'
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error('Network response was not ok ' + response.statusText);
+                }
+                const products = await response.json();
+                console.log('Fetched products:', products);
+                const productList = document.getElementById('product-list');
+                productList.innerHTML = '';
+                products.forEach(product => {
+                    const productDiv = document.createElement('div');
+                    productDiv.classList.add('product');
+                    productDiv.innerHTML = `
+                        <img src="${product.image}" alt="${product.name}">
+                        <h3>${product.name}</h3>
+                        <p>${product.description}</p>
+                    `;
+                    productList.appendChild(productDiv);
+                });
+            } catch (error) {
+                console.error('Error fetching products:', error);
+            }
         }
 
         fetchProducts();

@@ -11,149 +11,15 @@ provider "aws" {
   region = "il-central-1"
 }
 
-provider "local" {
-  version = "~> 2.1"
+# Function to compute ETag for files
+locals {
+  index_etag = filemd5("${path.module}/../frontend/index.html")
+  error_etag = filemd5("${path.module}/../frontend/error.html")
+  css_etags  = { for k, v in fileset("${path.module}/../frontend/css", "**/*") : k => filemd5("${path.module}/../frontend/css/${k}") }
+  image_etags = { for k, v in fileset("${path.module}/../frontend/images", "**/*") : k => filemd5("${path.module}/../frontend/images/${k}") }
 }
 
-# VPC and Subnet
-resource "aws_vpc" "default" {
-  cidr_block = "10.0.0.0/16"
-}
-
-resource "aws_subnet" "default" {
-  vpc_id                  = aws_vpc.default.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "il-central-1a"
-  map_public_ip_on_launch = true
-}
-
-resource "aws_internet_gateway" "default" {
-  vpc_id = aws_vpc.default.id
-}
-
-resource "aws_route_table" "default" {
-  vpc_id = aws_vpc.default.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.default.id
-  }
-}
-
-resource "aws_route_table_association" "default" {
-  subnet_id      = aws_subnet.default.id
-  route_table_id = aws_route_table.default.id
-}
-
-# Security Group
-resource "aws_security_group" "allow_ssh_http" {
-  vpc_id      = aws_vpc.default.id
-  name        = "allow_ssh_http"
-  description = "Allow SSH and HTTP inbound traffic"
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Key Pair
-resource "aws_key_pair" "deployer" {
-  key_name   = "deployer-key"
-  public_key = file("${path.module}/id_rsa.pub")
-}
-
-# EC2 Instance
-resource "aws_instance" "backend" {
-  ami                          = "ami-0fbd08534ff5a05ff"
-  instance_type                = "t3.micro"
-  key_name                     = aws_key_pair.deployer.key_name
-  vpc_security_group_ids       = [aws_security_group.allow_ssh_http.id]
-  subnet_id                    = aws_subnet.default.id
-  associate_public_ip_address  = true
-  tags = {
-    Name = "ecommerce-backend"
-  }
-
-  user_data = <<-EOF
-    #!/bin/bash
-    yum update -y
-    yum install -y python3
-    pip3 install flask
-    cat <<EOT > /home/ec2-user/app.py
-    from flask import Flask, request, jsonify
-
-    app = Flask(__name__)
-
-    @app.route('/')
-    def home():
-        return "E-commerce API"
-
-    @app.route('/products', methods=['POST'])
-    def add_product():
-        data = request.get_json()
-        # Add product to database logic here
-        return jsonify({"message": "Product added!"}), 201
-
-    if __name__ == '__main__':
-        app.run(host='0.0.0.0', port=80)
-    EOT
-    cat <<EOT > /etc/systemd/system/flask-app.service
-    [Unit]
-    Description=Flask App
-    After=network.target
-
-    [Service]
-    User=ec2-user
-    WorkingDirectory=/home/ec2-user
-    ExecStart=/usr/bin/sudo /usr/bin/python3 /home/ec2-user/app.py
-    Restart=always
-
-    [Install]
-    WantedBy=multi-user.target
-    EOT
-    systemctl daemon-reload
-    systemctl enable flask-app.service
-    systemctl start flask-app.service
-  EOF
-
-  connection {
-    type        = "ssh"
-    user        = "ec2-user"
-    private_key = file("${path.module}/id_rsa")
-    host        = self.public_ip
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "echo 'Setup complete'"
-    ]
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# S3 Bucket
+# S3 Bucket for Frontend
 resource "aws_s3_bucket" "frontend" {
   bucket = "ecommerce-frontend-bucket-unique-12345"
   tags = {
@@ -167,6 +33,7 @@ resource "aws_s3_object" "index_html" {
   key          = "index.html"
   source       = "${path.module}/../frontend/index.html"
   content_type = "text/html"
+  etag         = local.index_etag
 }
 
 resource "aws_s3_object" "error_html" {
@@ -174,18 +41,20 @@ resource "aws_s3_object" "error_html" {
   key          = "error.html"
   source       = "${path.module}/../frontend/error.html"
   content_type = "text/html"
+  etag         = local.error_etag
 }
 
 resource "aws_s3_object" "css_files" {
-  for_each     = fileset("${path.module}/../frontend/css", "**/*")
+  for_each     = local.css_etags
   bucket       = aws_s3_bucket.frontend.bucket
   key          = "css/${each.key}"
   source       = "${path.module}/../frontend/css/${each.key}"
   content_type = "text/css"
+  etag         = each.value
 }
 
 resource "aws_s3_object" "image_files" {
-  for_each     = fileset("${path.module}/../frontend/images", "**/*")
+  for_each     = local.image_etags
   bucket       = aws_s3_bucket.frontend.bucket
   key          = "images/${each.key}"
   source       = "${path.module}/../frontend/images/${each.key}"
@@ -196,6 +65,7 @@ resource "aws_s3_object" "image_files" {
     "gif"  = "image/gif",
     "svg"  = "image/svg+xml"
   }, substr(each.key, length(each.key) - 3, 3), "application/octet-stream")
+  etag         = each.value
 }
 
 resource "aws_s3_bucket_policy" "frontend_policy" {
@@ -234,18 +104,283 @@ resource "aws_s3_bucket_public_access_block" "frontend_public_access" {
   restrict_public_buckets = false
 }
 
-output "backend_public_ip" {
-  value = aws_instance.backend.public_ip
+# Lambda Function for Backend
+resource "aws_lambda_function" "backend" {
+  filename         = "${path.module}/../backend/lambda_function.zip"
+  function_name    = "ecommerce-backend"
+  role             = aws_iam_role.lambda_exec.arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = "python3.9"
+  source_code_hash = filebase64sha256("${path.module}/../backend/lambda_function.zip")
+}
+
+resource "aws_iam_role" "lambda_exec" {
+  name = "lambda_exec_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Action = "sts:AssumeRole",
+        Effect = "Allow",
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_exec_policy" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_api_gateway_rest_api" "api" {
+  name        = "ecommerce-api"
+  description = "E-commerce API"
+}
+
+resource "aws_api_gateway_resource" "products" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_rest_api.api.root_resource_id
+  path_part   = "products"
+}
+
+resource "aws_api_gateway_method" "root_method" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_rest_api.api.root_resource_id
+  http_method   = "ANY"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_method" "products_method" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.products.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+# Method Response for root method
+resource "aws_api_gateway_method_response" "root_method_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.root_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+# Method Response for products method
+resource "aws_api_gateway_method_response" "products_method_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.products_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration" "root_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_rest_api.api.root_resource_id
+  http_method             = aws_api_gateway_method.root_method.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.backend.invoke_arn
+}
+
+resource "aws_api_gateway_integration" "products_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.products.id
+  http_method             = aws_api_gateway_method.products_method.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.backend.invoke_arn
+}
+
+# Integration Response for root integration
+resource "aws_api_gateway_integration_response" "root_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.root_method.http_method
+  status_code = aws_api_gateway_method_response.root_method_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = ""
+  }
+}
+
+# Integration Response for products integration
+resource "aws_api_gateway_integration_response" "products_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.products_method.http_method
+  status_code = aws_api_gateway_method_response.products_method_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = ""
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.products_integration
+  ]
+}
+
+# Add CORS OPTIONS method to the root resource
+resource "aws_api_gateway_method" "options_root_method" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_rest_api.api.root_resource_id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_root_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_rest_api.api.root_resource_id
+  http_method             = aws_api_gateway_method.options_root_method.http_method
+  type                    = "MOCK"
+  integration_http_method = "OPTIONS"
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_root_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.options_root_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_root_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_rest_api.api.root_resource_id
+  http_method = aws_api_gateway_method.options_root_method.http_method
+  status_code = aws_api_gateway_method_response.options_root_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = ""
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.options_root_integration
+  ]
+}
+
+# Add CORS OPTIONS method to the products resource
+resource "aws_api_gateway_method" "options_products_method" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.products.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "options_products_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.products.id
+  http_method             = aws_api_gateway_method.options_products_method.http_method
+  type                    = "MOCK"
+  integration_http_method = "OPTIONS"
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "options_products_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.options_products_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "options_products_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.options_products_method.http_method
+  status_code = aws_api_gateway_method_response.options_products_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = ""
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.options_products_integration
+  ]
+}
+
+resource "aws_lambda_permission" "api_gw" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.backend.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.api.execution_arn}/*/*"
+}
+
+resource "aws_api_gateway_deployment" "deployment" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  stage_name  = "prod"
+
+  depends_on = [
+    aws_api_gateway_integration.root_integration,
+    aws_api_gateway_integration.products_integration,
+    aws_api_gateway_integration.options_root_integration,
+    aws_api_gateway_integration.options_products_integration,
+  ]
 }
 
 output "website_url" {
   value = "http://${aws_s3_bucket.frontend.website_endpoint}"
 }
 
-resource "null_resource" "start_instance" {
-  provisioner "local-exec" {
-    command = "aws ec2 start-instances --instance-ids ${aws_instance.backend.id}"
-  }
+output "api_url" {
+  value = aws_api_gateway_deployment.deployment.invoke_url
+}
 
-  #depends_on = [aws_instance.backend]
+output "products_api_url" {
+  value = "${aws_api_gateway_deployment.deployment.invoke_url}/products"
 }
