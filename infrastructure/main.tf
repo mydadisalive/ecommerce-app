@@ -161,6 +161,14 @@ resource "aws_api_gateway_method" "products_method" {
   authorization = "NONE"
 }
 
+# Create GET method for /products resource
+resource "aws_api_gateway_method" "products_get_method" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.products.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
 # Method Response for root method
 resource "aws_api_gateway_method_response" "root_method_response" {
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -189,6 +197,20 @@ resource "aws_api_gateway_method_response" "products_method_response" {
   }
 }
 
+# Method Response for GET /products
+resource "aws_api_gateway_method_response" "products_get_method_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.products_get_method.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true,
+    "method.response.header.Access-Control-Allow-Methods" = true,
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
 resource "aws_api_gateway_integration" "root_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_rest_api.api.root_resource_id
@@ -202,6 +224,16 @@ resource "aws_api_gateway_integration" "products_integration" {
   rest_api_id             = aws_api_gateway_rest_api.api.id
   resource_id             = aws_api_gateway_resource.products.id
   http_method             = aws_api_gateway_method.products_method.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.backend.invoke_arn
+}
+
+# Integration for GET /products
+resource "aws_api_gateway_integration" "products_get_integration" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.products.id
+  http_method             = aws_api_gateway_method.products_get_method.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
   uri                     = aws_lambda_function.backend.invoke_arn
@@ -244,6 +276,28 @@ resource "aws_api_gateway_integration_response" "products_integration_response" 
 
   depends_on = [
     aws_api_gateway_integration.products_integration
+  ]
+}
+
+# Integration Response for GET /products
+resource "aws_api_gateway_integration_response" "products_get_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.products.id
+  http_method = aws_api_gateway_method.products_get_method.http_method
+  status_code = aws_api_gateway_method_response.products_get_method_response.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'",
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,POST,OPTIONS'",
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+
+  response_templates = {
+    "application/json" = ""
+  }
+
+  depends_on = [
+    aws_api_gateway_integration.products_get_integration
   ]
 }
 
@@ -365,11 +419,15 @@ resource "aws_api_gateway_deployment" "deployment" {
   rest_api_id = aws_api_gateway_rest_api.api.id
   stage_name  = "prod"
 
+  # Add a stage description to force new deployments
+  description = "New deployment for GET and OPTIONS methods on /products"
+
   depends_on = [
     aws_api_gateway_integration.root_integration,
     aws_api_gateway_integration.products_integration,
     aws_api_gateway_integration.options_root_integration,
     aws_api_gateway_integration.options_products_integration,
+    aws_api_gateway_integration.products_get_integration,
   ]
 }
 

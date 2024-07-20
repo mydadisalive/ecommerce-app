@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E-commerce Frontend</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <title>E-commerce Products</title>
+    <link rel="stylesheet" href="css/styles.css"> <!-- Assuming styles.css is in a css folder -->
 </head>
 <body>
     <header>
@@ -12,8 +12,10 @@
     </header>
     <main>
         <section id="products">
-            <h2>Products</h2>
-            <div id="product-list"></div>
+            <h2>Product List</h2>
+            <ul class="product-list" id="product-list">
+                <!-- Products will be dynamically inserted here -->
+            </ul>
         </section>
     </main>
     <footer>
@@ -21,42 +23,52 @@
     </footer>
 
     <script>
-        const apiUrl = 'https://i8kr05wzp9.execute-api.il-central-1.amazonaws.com/prod';
+        // API endpoint
+        const apiEndpoint = 'https://i8kr05wzp9.execute-api.il-central-1.amazonaws.com/prod/products';
 
+        // Function to fetch products from the API
         async function fetchProducts() {
             try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        action: 'getProducts'
-                    })
-                });
+                console.log('Fetching products from:', apiEndpoint);
+                const response = await fetch(apiEndpoint);
+
+                console.log('API response status:', response.status);
                 if (!response.ok) {
                     throw new Error('Network response was not ok ' + response.statusText);
                 }
+
                 const products = await response.json();
                 console.log('Fetched products:', products);
-                const productList = document.getElementById('product-list');
-                productList.innerHTML = '';
-                products.forEach(product => {
-                    const productDiv = document.createElement('div');
-                    productDiv.classList.add('product');
-                    productDiv.innerHTML = `
-                        <img src="${product.image}" alt="${product.name}">
-                        <h3>${product.name}</h3>
-                        <p>${product.description}</p>
-                    `;
-                    productList.appendChild(productDiv);
-                });
+
+                if (!Array.isArray(products)) {
+                    throw new Error('Invalid product data format received');
+                }
+
+                displayProducts(products);
             } catch (error) {
                 console.error('Error fetching products:', error);
+                const productList = document.getElementById('product-list');
+                productList.innerHTML = '<p>Error loading products. Please try again later.</p>';
             }
         }
 
-        fetchProducts();
+        // Function to display products on the page
+        function displayProducts(products) {
+            const productList = document.getElementById('product-list');
+            productList.innerHTML = ''; // Clear existing products
+            products.forEach(product => {
+                const productItem = document.createElement('li');
+                productItem.innerHTML = `
+                    <h3>${product.name}</h3>
+                    <p>${product.description}</p>
+                    <img src="${product.image}" alt="${product.name}">
+                `;
+                productList.appendChild(productItem);
+            });
+        }
+
+        // Fetch and display products when the page loads
+        window.onload = fetchProducts;
     </script>
 </body>
 </html>
