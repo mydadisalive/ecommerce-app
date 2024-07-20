@@ -8,18 +8,31 @@
 </head>
 <body>
     <header>
-        <h1>Welcome to the E-commerce Frontend!</h1>
+        <div class="container">
+            <h1>Welcome to the E-commerce Frontend!</h1>
+        </div>
     </header>
     <main>
+        <section id="hero">
+            <div class="container">
+                <img src="images/hero.jpg" alt="Hero Image" class="hero-image">
+                <h2>Discover Our Amazing Products</h2>
+                <p>Find the best products at the best prices.</p>
+            </div>
+        </section>
         <section id="products">
-            <h2>Product List</h2>
-            <ul class="product-list" id="product-list">
-                <!-- Products will be dynamically inserted here -->
-            </ul>
+            <div class="container">
+                <h2>Product List</h2>
+                <ul class="product-list" id="product-list">
+                    <!-- Products will be dynamically inserted here -->
+                </ul>
+            </div>
         </section>
     </main>
     <footer>
-        <p>&copy; 2024 E-commerce Frontend</p>
+        <div class="container">
+            <p>&copy; 2024 E-commerce Frontend</p>
+        </div>
     </footer>
 
     <script>
@@ -58,6 +71,7 @@
             productList.innerHTML = ''; // Clear existing products
             products.forEach(product => {
                 const productItem = document.createElement('li');
+                productItem.classList.add('product-item');
                 productItem.innerHTML = `
                     <h3>${product.name}</h3>
                     <p>${product.description}</p>
